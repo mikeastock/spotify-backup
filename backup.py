@@ -6,7 +6,7 @@
 # ]
 # ///
 
-"""Back up Spotify liked songs to liked_songs.json."""
+"""Back up Spotify liked songs and saved albums."""
 
 import json
 import os
@@ -16,8 +16,8 @@ from dotenv import load_dotenv
 import spotipy
 from spotipy.oauth2 import SpotifyOAuth
 
-BACKUP_FILE = Path(__file__).parent / "liked_songs.json"
-CACHE_PATH = Path(__file__).parent / ".spotify_cache"
+BACKUP_DIR = Path(__file__).parent
+CACHE_PATH = BACKUP_DIR / ".spotify_cache"
 SCOPE = "user-library-read"
 PAGE_SIZE = 50
 
@@ -45,20 +45,26 @@ def authenticate() -> spotipy.Spotify:
     return spotipy.Spotify(auth_manager=auth_manager)
 
 
-def fetch_all_liked_songs(sp: spotipy.Spotify) -> list[dict]:
-    tracks = []
+def fetch_all(sp: spotipy.Spotify, fetch_fn, label: str) -> list[dict]:
+    items = []
     offset = 0
 
     while True:
-        page = sp.current_user_saved_tracks(limit=PAGE_SIZE, offset=offset)
-        items = page["items"]
-        if not items:
+        page = fetch_fn(limit=PAGE_SIZE, offset=offset)
+        batch = page["items"]
+        if not batch:
             break
-        tracks.extend(items)
-        print(f"  Fetched {len(tracks)} / {page['total']} tracks...")
+        items.extend(batch)
+        print(f"  Fetched {len(items)} / {page['total']} {label}...")
         offset += PAGE_SIZE
 
-    return tracks
+    return items
+
+
+def save(items: list[dict], path: Path) -> None:
+    items.sort(key=lambda item: item["added_at"])
+    path.write_text(json.dumps(items, indent=2, ensure_ascii=False) + "\n")
+    print(f"Saved to {path}")
 
 
 def main():
@@ -66,13 +72,14 @@ def main():
     sp = authenticate()
 
     print("Fetching liked songs...")
-    tracks = fetch_all_liked_songs(sp)
+    tracks = fetch_all(sp, sp.current_user_saved_tracks, "tracks")
     print(f"Total: {len(tracks)} liked songs")
+    save(tracks, BACKUP_DIR / "liked_songs.json")
 
-    tracks.sort(key=lambda t: t["added_at"])
-
-    BACKUP_FILE.write_text(json.dumps(tracks, indent=2, ensure_ascii=False) + "\n")
-    print(f"Saved to {BACKUP_FILE}")
+    print("\nFetching saved albums...")
+    albums = fetch_all(sp, sp.current_user_saved_albums, "albums")
+    print(f"Total: {len(albums)} saved albums")
+    save(albums, BACKUP_DIR / "saved_albums.json")
 
 
 if __name__ == "__main__":
